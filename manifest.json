@@ -1,0 +1,24 @@
+{
+  "name": "FoodSkin — Food & Eczema Tracker",
+  "short_name": "FoodSkin",
+  "description": "Track food intake and eczema flare-ups to discover dietary triggers",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#0E1117",
+  "theme_color": "#0E1117",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "icon-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
