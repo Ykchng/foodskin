@@ -82,10 +82,12 @@ async function analyzeImageWithGemini(apiKey, base64Image, mimeType, mode) {
       ? `You are a food identification assistant. Analyze this photo of food/drink and return a JSON object with:
 {
   "items": ["item1", "item2"],
-  "categories": ["category1", "category2"]
+  "categories": ["category1", "category2"],
+  "calories": 450
 }
 Items should be specific (e.g. "nasi lemak", "teh tarik", "grilled chicken").
 Categories should be broad food groups (e.g. "dairy", "gluten", "seafood", "fried food", "coconut milk", "eggs", "nuts", "caffeine", "alcohol", "spicy food", "processed food", "sugar").
+Calories should be your best estimate of the total kcal for everything visible in the photo (a single integer).
 Return ONLY the JSON, no other text.`
       : `You are a dermatology assistant. Analyze this photo of an eczema flare-up and return a JSON object with:
 {
@@ -337,6 +339,7 @@ function FoodLogScreen({ apiKey, data, setData }) {
   const [result, setResult] = useState(null);
   const [editItems, setEditItems] = useState("");
   const [editCats, setEditCats] = useState("");
+  const [editCalories, setEditCalories] = useState("");
   const [error, setError] = useState("");
 
   const handleCapture = async (base64, mimeType) => {
@@ -348,6 +351,7 @@ function FoodLogScreen({ apiKey, data, setData }) {
       setResult(res);
       setEditItems((res.items || []).join(", "));
       setEditCats((res.categories || []).join(", "));
+      setEditCalories(res.calories != null ? String(res.calories) : "");
     } catch (e) {
       setError(e.message);
     }
@@ -355,11 +359,13 @@ function FoodLogScreen({ apiKey, data, setData }) {
   };
 
   const handleSave = () => {
+    const cal = parseInt(editCalories, 10);
     const entry = {
       id: generateId(),
       timestamp: Date.now(),
       items: editItems.split(",").map((s) => s.trim()).filter(Boolean),
       categories: editCats.split(",").map((s) => s.trim()).filter(Boolean),
+      calories: isNaN(cal) ? null : cal,
     };
     const updated = { ...data, foodEntries: [entry, ...data.foodEntries] };
     setData(updated);
@@ -367,6 +373,7 @@ function FoodLogScreen({ apiKey, data, setData }) {
     setResult(null);
     setEditItems("");
     setEditCats("");
+    setEditCalories("");
   };
 
   return (
@@ -393,7 +400,14 @@ function FoodLogScreen({ apiKey, data, setData }) {
 
           <label style={{ fontSize: 12, color: colors.textDim, fontWeight: 600, display: "block", marginBottom: 6 }}>Categories</label>
           <input value={editCats} onChange={(e) => setEditCats(e.target.value)}
-            style={{ width: "100%", padding: "12px 14px", background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: 8, color: colors.text, fontSize: 14, fontFamily: fontStack, boxSizing: "border-box", marginBottom: 16, outline: "none" }}
+            style={{ width: "100%", padding: "12px 14px", background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: 8, color: colors.text, fontSize: 14, fontFamily: fontStack, boxSizing: "border-box", marginBottom: 14, outline: "none" }}
+          />
+
+          <label style={{ fontSize: 12, color: colors.textDim, fontWeight: 600, display: "block", marginBottom: 6 }}>Calories (kcal)</label>
+          <input value={editCalories} onChange={(e) => setEditCalories(e.target.value.replace(/[^0-9]/g, ""))}
+            inputMode="numeric"
+            placeholder="e.g. 450"
+            style={{ width: "100%", padding: "12px 14px", background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: 8, color: colors.text, fontSize: 14, fontFamily: monoStack, boxSizing: "border-box", marginBottom: 16, outline: "none" }}
           />
 
           <button onClick={handleSave} style={{
@@ -418,7 +432,10 @@ function FoodLogScreen({ apiKey, data, setData }) {
                   saveData(updated);
                 }} style={{ background: "none", border: "none", color: colors.textMuted, cursor: "pointer", fontSize: 16, padding: 4 }}>×</button>
               </div>
-              <div style={{ color: colors.textMuted, fontSize: 11, marginTop: 4 }}>{formatDateTime(e.timestamp)}</div>
+              <div style={{ color: colors.textMuted, fontSize: 11, marginTop: 4, display: "flex", gap: 8 }}>
+                <span>{formatDateTime(e.timestamp)}</span>
+                {e.calories != null && <span style={{ color: colors.accentDim, fontFamily: monoStack, fontWeight: 600 }}>{e.calories} kcal</span>}
+              </div>
               {e.categories.length > 0 && (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 8 }}>
                   {e.categories.map((c) => (
@@ -618,7 +635,10 @@ function TimelineScreen({ data }) {
               <div style={{ color: colors.text, fontSize: 14, fontWeight: 600 }}>
                 {e.type === "food" ? e.items.join(", ") : `${e.bodyArea} — severity ${e.severity}/5`}
               </div>
-              <div style={{ color: colors.textMuted, fontSize: 11, marginTop: 4 }}>{formatDateTime(e.timestamp)}</div>
+              <div style={{ color: colors.textMuted, fontSize: 11, marginTop: 4, display: "flex", gap: 8 }}>
+                <span>{formatDateTime(e.timestamp)}</span>
+                {e.type === "food" && e.calories != null && <span style={{ color: colors.accentDim, fontFamily: monoStack, fontWeight: 600 }}>{e.calories} kcal</span>}
+              </div>
               {e.type === "food" && e.categories.length > 0 && (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
                   {e.categories.map((c) => (
@@ -657,6 +677,16 @@ function InsightsScreen({ data }) {
           { label: "Meals logged", value: data.foodEntries.length },
           { label: "Flare-ups", value: data.eczemaEntries.length },
           { label: "Avg/day", value: totalDays > 0 ? (data.foodEntries.length / totalDays).toFixed(1) : "—" },
+          { label: "Today kcal", value: (() => {
+              const start = new Date(); start.setHours(0,0,0,0);
+              const sum = data.foodEntries.filter(e => e.timestamp >= start.getTime()).reduce((s,e) => s + (e.calories || 0), 0);
+              return sum || "—";
+            })() },
+          { label: "Avg kcal/day", value: (() => {
+              if (totalDays < 1) return "—";
+              const total = data.foodEntries.reduce((s,e) => s + (e.calories || 0), 0);
+              return total > 0 ? Math.round(total / totalDays) : "—";
+            })() },
         ].map((s) => (
           <div key={s.label} style={{ padding: 16, background: colors.surface, borderRadius: 12, border: `1px solid ${colors.border}`, textAlign: "center" }}>
             <div style={{ fontSize: 24, fontWeight: 700, color: colors.accent, fontFamily: monoStack }}>{s.value}</div>
