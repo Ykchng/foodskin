@@ -54,6 +54,17 @@ function daysBetween(a, b) {
   return Math.abs(b - a) / (1000 * 60 * 60 * 24);
 }
 
+function toDateTimeLocal(ts) {
+  const d = new Date(ts);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function fromDateTimeLocal(str) {
+  const t = new Date(str).getTime();
+  return isNaN(t) ? null : t;
+}
+
 // ─── Storage ───────────────────────────────────────────────────────────
 function loadData() {
   try {
@@ -340,6 +351,8 @@ function FoodLogScreen({ apiKey, data, setData }) {
   const [editItems, setEditItems] = useState("");
   const [editCats, setEditCats] = useState("");
   const [editCalories, setEditCalories] = useState("");
+  const [editingTimeId, setEditingTimeId] = useState(null);
+  const [timeDraft, setTimeDraft] = useState("");
   const [error, setError] = useState("");
 
   const handleCapture = async (base64, mimeType) => {
@@ -426,16 +439,38 @@ function FoodLogScreen({ apiKey, data, setData }) {
             <div key={e.id} style={{ padding: "14px 16px", background: colors.surface, borderRadius: 10, marginBottom: 8, border: `1px solid ${colors.border}` }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div style={{ color: colors.text, fontSize: 14, fontWeight: 600 }}>{e.items.join(", ")}</div>
-                <button onClick={() => {
-                  const updated = { ...data, foodEntries: data.foodEntries.filter((x) => x.id !== e.id) };
-                  setData(updated);
-                  saveData(updated);
-                }} style={{ background: "none", border: "none", color: colors.textMuted, cursor: "pointer", fontSize: 16, padding: 4 }}>×</button>
+                <div style={{ display: "flex", gap: 2 }}>
+                  <button onClick={() => { setEditingTimeId(e.id); setTimeDraft(toDateTimeLocal(e.timestamp)); }}
+                    style={{ background: "none", border: "none", color: colors.textMuted, cursor: "pointer", fontSize: 14, padding: 4 }}>✎</button>
+                  <button onClick={() => {
+                    const updated = { ...data, foodEntries: data.foodEntries.filter((x) => x.id !== e.id) };
+                    setData(updated);
+                    saveData(updated);
+                  }} style={{ background: "none", border: "none", color: colors.textMuted, cursor: "pointer", fontSize: 16, padding: 4 }}>×</button>
+                </div>
               </div>
-              <div style={{ color: colors.textMuted, fontSize: 11, marginTop: 4, display: "flex", gap: 8 }}>
-                <span>{formatDateTime(e.timestamp)}</span>
-                {e.calories != null && <span style={{ color: colors.accentDim, fontFamily: monoStack, fontWeight: 600 }}>{e.calories} kcal</span>}
-              </div>
+              {editingTimeId === e.id ? (
+                <div style={{ marginTop: 10, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                  <input type="datetime-local" value={timeDraft} onChange={(ev) => setTimeDraft(ev.target.value)}
+                    style={{ flex: 1, minWidth: 180, padding: "8px 10px", background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: 6, color: colors.text, fontSize: 13, fontFamily: fontStack, outline: "none" }} />
+                  <button onClick={() => {
+                    const t = fromDateTimeLocal(timeDraft);
+                    if (t) {
+                      const updated = { ...data, foodEntries: data.foodEntries.map((x) => x.id === e.id ? { ...x, timestamp: t } : x) };
+                      setData(updated);
+                      saveData(updated);
+                    }
+                    setEditingTimeId(null);
+                  }} style={{ padding: "8px 12px", background: colors.accent, color: colors.bg, border: "none", borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Save</button>
+                  <button onClick={() => setEditingTimeId(null)}
+                    style={{ padding: "8px 12px", background: colors.bg, color: colors.textDim, border: `1px solid ${colors.border}`, borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
+                </div>
+              ) : (
+                <div style={{ color: colors.textMuted, fontSize: 11, marginTop: 4, display: "flex", gap: 8 }}>
+                  <span>{formatDateTime(e.timestamp)}</span>
+                  {e.calories != null && <span style={{ color: colors.accentDim, fontFamily: monoStack, fontWeight: 600 }}>{e.calories} kcal</span>}
+                </div>
+              )}
               {e.categories.length > 0 && (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 8 }}>
                   {e.categories.map((c) => (
@@ -457,6 +492,8 @@ function EczemaLogScreen({ apiKey, data, setData }) {
   const [severity, setSeverity] = useState(3);
   const [bodyArea, setBodyArea] = useState("face");
   const [description, setDescription] = useState("");
+  const [editingTimeId, setEditingTimeId] = useState(null);
+  const [timeDraft, setTimeDraft] = useState("");
   const [error, setError] = useState("");
   const bodyAreas = ["face", "neck", "arms", "body", "legs"];
 
@@ -587,12 +624,33 @@ function EczemaLogScreen({ apiKey, data, setData }) {
                     <div style={{ color: colors.textMuted, fontSize: 11, marginTop: 2 }}>{formatDateTime(e.timestamp)}</div>
                   </div>
                 </div>
-                <button onClick={() => {
-                  const updated = { ...data, eczemaEntries: data.eczemaEntries.filter((x) => x.id !== e.id) };
-                  setData(updated);
-                  saveData(updated);
-                }} style={{ background: "none", border: "none", color: colors.textMuted, cursor: "pointer", fontSize: 16, padding: 4 }}>×</button>
+                <div style={{ display: "flex", gap: 2 }}>
+                  <button onClick={() => { setEditingTimeId(e.id); setTimeDraft(toDateTimeLocal(e.timestamp)); }}
+                    style={{ background: "none", border: "none", color: colors.textMuted, cursor: "pointer", fontSize: 14, padding: 4 }}>✎</button>
+                  <button onClick={() => {
+                    const updated = { ...data, eczemaEntries: data.eczemaEntries.filter((x) => x.id !== e.id) };
+                    setData(updated);
+                    saveData(updated);
+                  }} style={{ background: "none", border: "none", color: colors.textMuted, cursor: "pointer", fontSize: 16, padding: 4 }}>×</button>
+                </div>
               </div>
+              {editingTimeId === e.id && (
+                <div style={{ marginTop: 10, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                  <input type="datetime-local" value={timeDraft} onChange={(ev) => setTimeDraft(ev.target.value)}
+                    style={{ flex: 1, minWidth: 180, padding: "8px 10px", background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: 6, color: colors.text, fontSize: 13, fontFamily: fontStack, outline: "none" }} />
+                  <button onClick={() => {
+                    const t = fromDateTimeLocal(timeDraft);
+                    if (t) {
+                      const updated = { ...data, eczemaEntries: data.eczemaEntries.map((x) => x.id === e.id ? { ...x, timestamp: t } : x) };
+                      setData(updated);
+                      saveData(updated);
+                    }
+                    setEditingTimeId(null);
+                  }} style={{ padding: "8px 12px", background: colors.accent, color: colors.bg, border: "none", borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Save</button>
+                  <button onClick={() => setEditingTimeId(null)}
+                    style={{ padding: "8px 12px", background: colors.bg, color: colors.textDim, border: `1px solid ${colors.border}`, borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
+                </div>
+              )}
               {e.description && <div style={{ color: colors.textDim, fontSize: 12, marginTop: 8 }}>{e.description}</div>}
             </div>
           ))}
@@ -602,13 +660,25 @@ function EczemaLogScreen({ apiKey, data, setData }) {
   );
 }
 
-function TimelineScreen({ data }) {
+function TimelineScreen({ data, setData }) {
+  const [editingTimeId, setEditingTimeId] = useState(null);
+  const [timeDraft, setTimeDraft] = useState("");
   const allEntries = [
     ...data.foodEntries.map((e) => ({ ...e, type: "food" })),
     ...data.eczemaEntries.map((e) => ({ ...e, type: "eczema" })),
   ].sort((a, b) => b.timestamp - a.timestamp);
 
   const severityColors = ["#6EE7B7", "#A7F3D0", "#FCD34D", "#F97316", "#EF4444"];
+
+  const saveTime = (entry) => {
+    const t = fromDateTimeLocal(timeDraft);
+    if (!t) { setEditingTimeId(null); return; }
+    const key = entry.type === "food" ? "foodEntries" : "eczemaEntries";
+    const updated = { ...data, [key]: data[key].map((x) => x.id === entry.id ? { ...x, timestamp: t } : x) };
+    setData(updated);
+    saveData(updated);
+    setEditingTimeId(null);
+  };
 
   return (
     <div style={{ padding: "20px 16px 100px", fontFamily: fontStack }}>
@@ -632,13 +702,28 @@ function TimelineScreen({ data }) {
           }}>
             <span style={{ fontSize: 20, marginTop: 2 }}>{e.type === "food" ? "🍽️" : "🩹"}</span>
             <div style={{ flex: 1 }}>
-              <div style={{ color: colors.text, fontSize: 14, fontWeight: 600 }}>
-                {e.type === "food" ? e.items.join(", ") : `${e.bodyArea} — severity ${e.severity}/5`}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                <div style={{ color: colors.text, fontSize: 14, fontWeight: 600 }}>
+                  {e.type === "food" ? e.items.join(", ") : `${e.bodyArea} — severity ${e.severity}/5`}
+                </div>
+                <button onClick={() => { setEditingTimeId(e.id); setTimeDraft(toDateTimeLocal(e.timestamp)); }}
+                  style={{ background: "none", border: "none", color: colors.textMuted, cursor: "pointer", fontSize: 13, padding: 2 }}>✎</button>
               </div>
-              <div style={{ color: colors.textMuted, fontSize: 11, marginTop: 4, display: "flex", gap: 8 }}>
-                <span>{formatDateTime(e.timestamp)}</span>
-                {e.type === "food" && e.calories != null && <span style={{ color: colors.accentDim, fontFamily: monoStack, fontWeight: 600 }}>{e.calories} kcal</span>}
-              </div>
+              {editingTimeId === e.id ? (
+                <div style={{ marginTop: 8, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                  <input type="datetime-local" value={timeDraft} onChange={(ev) => setTimeDraft(ev.target.value)}
+                    style={{ flex: 1, minWidth: 160, padding: "6px 8px", background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: 6, color: colors.text, fontSize: 12, fontFamily: fontStack, outline: "none" }} />
+                  <button onClick={() => saveTime(e)}
+                    style={{ padding: "6px 10px", background: colors.accent, color: colors.bg, border: "none", borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: "pointer" }}>Save</button>
+                  <button onClick={() => setEditingTimeId(null)}
+                    style={{ padding: "6px 10px", background: colors.bg, color: colors.textDim, border: `1px solid ${colors.border}`, borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
+                </div>
+              ) : (
+                <div style={{ color: colors.textMuted, fontSize: 11, marginTop: 4, display: "flex", gap: 8 }}>
+                  <span>{formatDateTime(e.timestamp)}</span>
+                  {e.type === "food" && e.calories != null && <span style={{ color: colors.accentDim, fontFamily: monoStack, fontWeight: 600 }}>{e.calories} kcal</span>}
+                </div>
+              )}
               {e.type === "food" && e.categories.length > 0 && (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
                   {e.categories.map((c) => (
@@ -884,7 +969,7 @@ function App() {
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
       {tab === "food" && <FoodLogScreen apiKey={apiKey} data={data} setData={setData} />}
       {tab === "eczema" && <EczemaLogScreen apiKey={apiKey} data={data} setData={setData} />}
-      {tab === "timeline" && <TimelineScreen data={data} />}
+      {tab === "timeline" && <TimelineScreen data={data} setData={setData} />}
       {tab === "insights" && <InsightsScreen data={data} />}
       {tab === "settings" && <SettingsScreen onClearKey={handleClearKey} />}
       <BottomNav tab={tab} setTab={setTab} />
