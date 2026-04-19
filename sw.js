@@ -1,4 +1,4 @@
-const CACHE_NAME = "foodskin-v4";
+const CACHE_NAME = "foodskin-v5";
 const ASSETS = [
   ".",
   "index.html",

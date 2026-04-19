@@ -54,6 +54,19 @@ function daysBetween(a, b) {
   return Math.abs(b - a) / (1000 * 60 * 60 * 24);
 }
 
+// Normalise items — old entries stored string[], new store {name,qty}[]
+function normalizeItems(items) {
+  if (!items || items.length === 0) return [];
+  if (typeof items[0] === "string") return items.map((name) => ({ name, qty: "" }));
+  return items;
+}
+
+function itemsToDisplay(items) {
+  return normalizeItems(items)
+    .map((i) => (i.qty ? `${i.name} (${i.qty})` : i.name))
+    .join(", ");
+}
+
 function toDateTimeLocal(ts) {
   const d = new Date(ts);
   const pad = (n) => String(n).padStart(2, "0");
@@ -92,11 +105,11 @@ async function analyzeImageWithGemini(apiKey, base64Image, mimeType, mode) {
     mode === "food"
       ? `You are a food identification assistant. Analyze this photo of food/drink and return a JSON object with:
 {
-  "items": ["item1", "item2"],
-  "categories": ["category1", "category2"],
-  "calories": 450
+  "items": [{"name": "nasi lemak", "qty": "1 plate"}, {"name": "teh tarik", "qty": "1 cup"}],
+  "categories": ["coconut milk", "caffeine"],
+  "calories": 650
 }
-Items should be specific (e.g. "nasi lemak", "teh tarik", "grilled chicken").
+Each item should have a specific name (e.g. "chicken wings", "steamed rice", "teh tarik") and an estimated qty/serving (e.g. "3 pieces", "1 bowl", "1 cup", "2 slices"). Use empty string for qty if unclear.
 Categories should be broad food groups (e.g. "dairy", "gluten", "seafood", "fried food", "coconut milk", "eggs", "nuts", "caffeine", "alcohol", "spicy food", "processed food", "sugar").
 Calories should be your best estimate of the total kcal for everything visible in the photo (a single integer).
 Return ONLY the JSON, no other text.`
@@ -348,7 +361,7 @@ function PhotoCapture({ onCapture, loading }) {
 function FoodLogScreen({ apiKey, data, setData }) {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
-  const [editItems, setEditItems] = useState("");
+  const [editItemsList, setEditItemsList] = useState([]); // [{id,name,qty}]
   const [editCats, setEditCats] = useState("");
   const [editCalories, setEditCalories] = useState("");
   const [editingTimeId, setEditingTimeId] = useState(null);
@@ -362,7 +375,7 @@ function FoodLogScreen({ apiKey, data, setData }) {
     try {
       const res = await analyzeImageWithGemini(apiKey, base64, mimeType, "food");
       setResult(res);
-      setEditItems((res.items || []).join(", "));
+      setEditItemsList(normalizeItems(res.items || []).map((i) => ({ ...i, id: generateId() })));
       setEditCats((res.categories || []).join(", "));
       setEditCalories(res.calories != null ? String(res.calories) : "");
     } catch (e) {
@@ -371,12 +384,19 @@ function FoodLogScreen({ apiKey, data, setData }) {
     setLoading(false);
   };
 
+  const updateItem = (id, field, val) =>
+    setEditItemsList((prev) => prev.map((i) => i.id === id ? { ...i, [field]: val } : i));
+  const removeItem = (id) =>
+    setEditItemsList((prev) => prev.filter((i) => i.id !== id));
+  const addItem = () =>
+    setEditItemsList((prev) => [...prev, { id: generateId(), name: "", qty: "" }]);
+
   const handleSave = () => {
     const cal = parseInt(editCalories, 10);
     const entry = {
       id: generateId(),
       timestamp: Date.now(),
-      items: editItems.split(",").map((s) => s.trim()).filter(Boolean),
+      items: editItemsList.filter((i) => i.name.trim()).map(({ name, qty }) => ({ name: name.trim(), qty: qty.trim() })),
       categories: editCats.split(",").map((s) => s.trim()).filter(Boolean),
       calories: isNaN(cal) ? null : cal,
     };
@@ -384,7 +404,7 @@ function FoodLogScreen({ apiKey, data, setData }) {
     setData(updated);
     saveData(updated);
     setResult(null);
-    setEditItems("");
+    setEditItemsList([]);
     setEditCats("");
     setEditCalories("");
   };
@@ -406,10 +426,27 @@ function FoodLogScreen({ apiKey, data, setData }) {
         <div style={{ marginTop: 20, padding: 20, background: colors.surface, borderRadius: 14, border: `1px solid ${colors.border}` }}>
           <div style={{ fontSize: 13, color: colors.accent, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 14 }}>AI Identified</div>
 
-          <label style={{ fontSize: 12, color: colors.textDim, fontWeight: 600, display: "block", marginBottom: 6 }}>Food Items</label>
-          <input value={editItems} onChange={(e) => setEditItems(e.target.value)}
-            style={{ width: "100%", padding: "12px 14px", background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: 8, color: colors.text, fontSize: 14, fontFamily: fontStack, boxSizing: "border-box", marginBottom: 14, outline: "none" }}
-          />
+          <label style={{ fontSize: 12, color: colors.textDim, fontWeight: 600, display: "block", marginBottom: 8 }}>Food Items</label>
+          {editItemsList.map((item) => (
+            <div key={item.id} style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
+              <input
+                value={item.name}
+                onChange={(e) => updateItem(item.id, "name", e.target.value)}
+                placeholder="item name"
+                style={{ flex: 1, padding: "10px 12px", background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: 8, color: colors.text, fontSize: 14, fontFamily: fontStack, outline: "none" }}
+              />
+              <input
+                value={item.qty}
+                onChange={(e) => updateItem(item.id, "qty", e.target.value)}
+                placeholder="qty"
+                style={{ width: 80, padding: "10px 10px", background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: 8, color: colors.text, fontSize: 13, fontFamily: fontStack, outline: "none" }}
+              />
+              <button onClick={() => removeItem(item.id)} style={{ background: "none", border: "none", color: colors.textMuted, cursor: "pointer", fontSize: 18, padding: "0 4px", lineHeight: 1 }}>×</button>
+            </div>
+          ))}
+          <button onClick={addItem} style={{ fontSize: 12, color: colors.accentDim, background: "none", border: `1px dashed ${colors.border}`, borderRadius: 8, padding: "8px 14px", cursor: "pointer", marginBottom: 14, fontFamily: fontStack, fontWeight: 600 }}>
+            + Add item
+          </button>
 
           <label style={{ fontSize: 12, color: colors.textDim, fontWeight: 600, display: "block", marginBottom: 6 }}>Categories</label>
           <input value={editCats} onChange={(e) => setEditCats(e.target.value)}
@@ -438,7 +475,7 @@ function FoodLogScreen({ apiKey, data, setData }) {
           {data.foodEntries.slice(0, 5).map((e) => (
             <div key={e.id} style={{ padding: "14px 16px", background: colors.surface, borderRadius: 10, marginBottom: 8, border: `1px solid ${colors.border}` }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div style={{ color: colors.text, fontSize: 14, fontWeight: 600 }}>{e.items.join(", ")}</div>
+                <div style={{ color: colors.text, fontSize: 14, fontWeight: 600 }}>{itemsToDisplay(e.items)}</div>
                 <div style={{ display: "flex", gap: 2 }}>
                   <button onClick={() => { setEditingTimeId(e.id); setTimeDraft(toDateTimeLocal(e.timestamp)); }}
                     style={{ background: "none", border: "none", color: colors.textMuted, cursor: "pointer", fontSize: 14, padding: 4 }}>✎</button>
@@ -704,7 +741,7 @@ function TimelineScreen({ data, setData }) {
             <div style={{ flex: 1 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
                 <div style={{ color: colors.text, fontSize: 14, fontWeight: 600 }}>
-                  {e.type === "food" ? e.items.join(", ") : `${e.bodyArea} — severity ${e.severity}/5`}
+                  {e.type === "food" ? itemsToDisplay(e.items) : `${e.bodyArea} — severity ${e.severity}/5`}
                 </div>
                 <button onClick={() => { setEditingTimeId(e.id); setTimeDraft(toDateTimeLocal(e.timestamp)); }}
                   style={{ background: "none", border: "none", color: colors.textMuted, cursor: "pointer", fontSize: 13, padding: 2 }}>✎</button>
