@@ -7,7 +7,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="FoodSkin" />
-  <meta name="description" content="Track food & eczema flare-ups to discover dietary triggers" />
+  <meta name="description" content="Daily food & skin tracking to discover dietary triggers" />
   <link rel="manifest" href="manifest.json" />
   <link rel="apple-touch-icon" href="icon-192.svg" />
   <link rel="icon" href="icon-192.svg" type="image/svg+xml" />
@@ -113,17 +113,17 @@ Each item should have a specific name (e.g. "chicken wings", "steamed rice", "te
 Categories should be broad food groups (e.g. "dairy", "gluten", "seafood", "fried food", "coconut milk", "eggs", "nuts", "caffeine", "alcohol", "spicy food", "processed food", "sugar").
 Calories should be your best estimate of the total kcal for everything visible in the photo (a single integer).
 Return ONLY the JSON, no other text.`
-      : `You are a dermatology assistant. Analyze this photo of an eczema flare-up and return a JSON object with:
+      : `You are a dermatology assistant helping someone track their skin condition daily. Analyze this photo of skin and return a JSON object:
 {
-  "severity": 3,
-  "description": "brief description of the condition"
+  "severity": 2,
+  "description": "brief description of the skin condition"
 }
-Severity should be 1-5 where:
-1 = very mild (slight redness)
-2 = mild (visible redness, minor dryness)
-3 = moderate (noticeable rash, some swelling)
-4 = severe (intense redness, cracking, oozing)
-5 = very severe (widespread, bleeding, significant skin damage)
+Rate severity 1-5 based on what you see (the skin may be completely healthy today):
+1 = Clear / healthy (no visible signs of eczema or irritation)
+2 = Very mild (slight dryness or faint redness)
+3 = Mild (visible redness, dryness, or rough patches)
+4 = Moderate (noticeable rash, inflammation, or irritation)
+5 = Severe (intense redness, cracking, widespread flare-up)
 Return ONLY the JSON, no other text.`;
 
   const resp = await fetch(
@@ -156,9 +156,12 @@ Return ONLY the JSON, no other text.`;
 }
 
 // ─── Analysis Engine ───────────────────────────────────────────────────
+// Continuous-severity model: for each food category, compute the average
+// skin severity across readings taken 12–48h AFTER eating that category,
+// and compare with the overall baseline severity. Ratio > 1 = possible trigger.
 function computeCorrelations(data) {
   const { foodEntries, eczemaEntries } = data;
-  if (eczemaEntries.length < 3 || foodEntries.length < 10) return null;
+  if (eczemaEntries.length < 14 || foodEntries.length < 10) return null;
 
   const firstEntry = Math.min(
     ...foodEntries.map((e) => e.timestamp),
@@ -167,46 +170,40 @@ function computeCorrelations(data) {
   const totalDays = daysBetween(firstEntry, Date.now());
   if (totalDays < 14) return null;
 
-  const categoryCount = {};
-  const categoryBeforeFlare = {};
+  // Baseline: avg severity across all skin readings
+  const baselineAvg =
+    eczemaEntries.reduce((s, e) => s + e.severity, 0) / eczemaEntries.length;
+  if (baselineAvg === 0) return null;
+
+  // For each food entry, find skin readings in the 12–48h window after,
+  // and attribute their severity to each category eaten.
+  const perCategory = {}; // { cat: [severity, severity, ...] }
   foodEntries.forEach((f) => {
-    (f.categories || []).forEach((cat) => {
-      categoryCount[cat] = (categoryCount[cat] || 0) + 1;
-    });
-  });
-
-  eczemaEntries.forEach((flare) => {
-    const windowStart = flare.timestamp - 48 * 60 * 60 * 1000;
-    const windowEnd = flare.timestamp - 2 * 60 * 60 * 1000;
-    const foodsInWindow = foodEntries.filter(
-      (f) => f.timestamp >= windowStart && f.timestamp <= windowEnd
+    const windowStart = f.timestamp + 12 * 60 * 60 * 1000;
+    const windowEnd = f.timestamp + 48 * 60 * 60 * 1000;
+    const readingsAfter = eczemaEntries.filter(
+      (e) => e.timestamp >= windowStart && e.timestamp <= windowEnd
     );
-    const catsInWindow = new Set();
-    foodsInWindow.forEach((f) => {
-      (f.categories || []).forEach((cat) => catsInWindow.add(cat));
-    });
-    catsInWindow.forEach((cat) => {
-      categoryBeforeFlare[cat] = (categoryBeforeFlare[cat] || 0) + 1;
+    if (readingsAfter.length === 0) return;
+    (f.categories || []).forEach((cat) => {
+      if (!perCategory[cat]) perCategory[cat] = [];
+      readingsAfter.forEach((r) => perCategory[cat].push(r.severity));
     });
   });
 
-  const totalMeals = foodEntries.length;
-  const totalFlares = eczemaEntries.length;
   const results = [];
-
-  Object.keys(categoryBeforeFlare).forEach((cat) => {
-    const flareRate = categoryBeforeFlare[cat] / totalFlares;
-    const baselineRate = (categoryCount[cat] || 0) / totalMeals;
-    if (baselineRate > 0) {
-      const riskRatio = flareRate / baselineRate;
-      results.push({
-        category: cat,
-        riskRatio: Math.round(riskRatio * 100) / 100,
-        timesBeforeFlare: categoryBeforeFlare[cat],
-        totalFlares,
-        totalOccurrences: categoryCount[cat] || 0,
-      });
-    }
+  Object.keys(perCategory).forEach((cat) => {
+    const sevs = perCategory[cat];
+    if (sevs.length < 3) return; // need a few samples for signal
+    const avgAfter = sevs.reduce((s, v) => s + v, 0) / sevs.length;
+    const riskRatio = avgAfter / baselineAvg;
+    results.push({
+      category: cat,
+      riskRatio: Math.round(riskRatio * 100) / 100,
+      avgSeverityAfter: Math.round(avgAfter * 10) / 10,
+      baselineSeverity: Math.round(baselineAvg * 10) / 10,
+      sampleSize: sevs.length,
+    });
   });
 
   results.sort((a, b) => b.riskRatio - a.riskRatio);
@@ -253,7 +250,7 @@ function SetupScreen({ onSave }) {
           {"🍽️ FoodSkin"}
         </div>
         <div style={{ color: colors.textDim, fontSize: 14, marginBottom: 32, lineHeight: 1.5 }}>
-          Track food & eczema flare-ups to discover your triggers.
+          Daily food & skin tracking to discover your triggers.
         </div>
         <label style={{ color: colors.textDim, fontSize: 12, fontWeight: 600, letterSpacing: "0.5px", textTransform: "uppercase", display: "block", marginBottom: 8 }}>
           Gemini API Key
@@ -292,7 +289,7 @@ function SetupScreen({ onSave }) {
 function BottomNav({ tab, setTab }) {
   const tabs = [
     { id: "food", icon: "🍽️", label: "Food" },
-    { id: "eczema", icon: "🩹", label: "Eczema" },
+    { id: "eczema", icon: "🪞", label: "Skin" },
     { id: "timeline", icon: "📋", label: "Timeline" },
     { id: "insights", icon: "🔍", label: "Insights" },
     { id: "settings", icon: "⚙️", label: "Settings" },
@@ -579,12 +576,12 @@ function EczemaLogScreen({ apiKey, data, setData }) {
   };
 
   const severityColors = ["#6EE7B7", "#A7F3D0", "#FCD34D", "#F97316", "#EF4444"];
-  const severityLabels = ["Very Mild", "Mild", "Moderate", "Severe", "Very Severe"];
+  const severityLabels = ["Clear", "Very Mild", "Mild", "Moderate", "Severe"];
 
   return (
     <div style={{ padding: "20px 16px 100px", fontFamily: fontStack }}>
-      <div style={{ fontSize: 24, fontWeight: 700, color: colors.text, marginBottom: 4 }}>Log Eczema</div>
-      <div style={{ color: colors.textDim, fontSize: 13, marginBottom: 20 }}>Photo for AI severity assessment, or log manually</div>
+      <div style={{ fontSize: 24, fontWeight: 700, color: colors.text, marginBottom: 4 }}>Daily Skin Check</div>
+      <div style={{ color: colors.textDim, fontSize: 13, marginBottom: 20 }}>Snap a photo of your skin today — healthy days count too</div>
 
       <PhotoCapture onCapture={handleCapture} loading={loading} />
 
@@ -632,7 +629,7 @@ function EczemaLogScreen({ apiKey, data, setData }) {
 
         <label style={{ fontSize: 12, color: colors.textDim, fontWeight: 600, display: "block", marginBottom: 6 }}>Notes</label>
         <textarea value={description} onChange={(e) => setDescription(e.target.value)}
-          placeholder="Any notes about this flare-up..."
+          placeholder="Any notes about your skin today..."
           rows={2}
           style={{ width: "100%", padding: "12px 14px", background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: 8, color: colors.text, fontSize: 14, fontFamily: fontStack, boxSizing: "border-box", marginBottom: 16, outline: "none", resize: "none" }}
         />
@@ -721,7 +718,7 @@ function TimelineScreen({ data, setData }) {
     <div style={{ padding: "20px 16px 100px", fontFamily: fontStack }}>
       <div style={{ fontSize: 24, fontWeight: 700, color: colors.text, marginBottom: 4 }}>Timeline</div>
       <div style={{ color: colors.textDim, fontSize: 13, marginBottom: 20 }}>
-        {data.foodEntries.length} meals · {data.eczemaEntries.length} flare-ups logged
+        {data.foodEntries.length} meals · {data.eczemaEntries.length} skin check-ins logged
       </div>
 
       {allEntries.length === 0 && (
@@ -797,8 +794,10 @@ function InsightsScreen({ data }) {
         {[
           { label: "Days tracked", value: Math.round(totalDays) },
           { label: "Meals logged", value: data.foodEntries.length },
-          { label: "Flare-ups", value: data.eczemaEntries.length },
-          { label: "Avg/day", value: totalDays > 0 ? (data.foodEntries.length / totalDays).toFixed(1) : "—" },
+          { label: "Skin check-ins", value: data.eczemaEntries.length },
+          { label: "Avg severity", value: data.eczemaEntries.length > 0
+              ? (data.eczemaEntries.reduce((s, e) => s + e.severity, 0) / data.eczemaEntries.length).toFixed(1)
+              : "—" },
           { label: "Today kcal", value: (() => {
               const start = new Date(); start.setHours(0,0,0,0);
               const sum = data.foodEntries.filter(e => e.timestamp >= start.getTime()).reduce((s,e) => s + (e.calories || 0), 0);
@@ -839,7 +838,7 @@ function InsightsScreen({ data }) {
           <div style={{ fontSize: 32, marginBottom: 12 }}>{"📊"}</div>
           <div style={{ color: colors.text, fontSize: 15, fontWeight: 600, marginBottom: 6 }}>Not enough data yet</div>
           <div style={{ color: colors.textDim, fontSize: 13, lineHeight: 1.5 }}>
-            Keep logging for at least 2 weeks with 10+ meals and 3+ flare-ups to see correlations.
+            Keep logging daily for at least 2 weeks (14+ skin check-ins, 10+ meals) to see correlations.
           </div>
         </div>
       ) : (
@@ -871,7 +870,7 @@ function InsightsScreen({ data }) {
                     </span>
                   </div>
                   <div style={{ color: colors.textMuted, fontSize: 11, marginTop: 6 }}>
-                    Found before {c.timesBeforeFlare} of {c.totalFlares} flare-ups · eaten {c.totalOccurrences} times total
+                    Avg severity after: {c.avgSeverityAfter} vs baseline {c.baselineSeverity} · {c.sampleSize} readings
                   </div>
                 </div>
               ))

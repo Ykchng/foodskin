@@ -8,10 +8,10 @@ A PWA (Progressive Web App) that runs on a phone via browser / home screen icon.
 
 ## Core workflow
 
-1. **Log food**: Take photo of meal → Gemini AI identifies food items + categories → user confirms/edits → saved with timestamp
-2. **Log eczema**: Take photo of flare-up → Gemini AI assesses severity (1-5) → user picks body area (face/neck/arms/body/legs) + adds notes → saved with timestamp. Can also log manually without photo.
-3. **Timeline**: Scrollable feed of all entries (food + eczema) in chronological order
-4. **Insights**: Rule-based correlation engine that continuously updates. Scans 12-48h window before each flare-up, compares food category frequency in pre-flare windows vs baseline diet, flags disproportionately appearing foods as potential triggers. Needs 10+ meals, 3+ flare-ups, 2+ weeks of data.
+1. **Log food**: Take photo of meal → Gemini AI identifies food items (with quantities), categories, and calorie estimate → user confirms/edits each item individually → saved with timestamp
+2. **Daily skin check**: Take a photo of skin every day (face by default) → Gemini AI rates severity 1-5 (1=clear/healthy, 5=severe flare) → user picks body area + adds notes → saved with timestamp. Can also log manually without photo. Goal is daily check-ins regardless of whether there's a flare, so the data is continuous.
+3. **Timeline**: Scrollable feed of all entries (food + skin) in chronological order. Each entry's date/time can be edited in-line.
+4. **Insights**: Rule-based correlation engine with continuous-severity model. For each food category, computes the average skin severity across readings taken 12–48h after eating that category, and compares to the user's overall baseline severity. Ratio > 1 = possible trigger. Needs 10+ meals, 14+ daily skin check-ins, 2+ weeks of data.
 5. **Settings**: Export/import JSON, change API key, clear data
 
 ## Tech decisions already made
@@ -19,8 +19,9 @@ A PWA (Progressive Web App) that runs on a phone via browser / home screen icon.
 - **AI backend**: Google Gemini API (free tier, model: gemini-2.0-flash). User has their own API key. App designed so Claude/Anthropic API can be swapped in later via a toggle.
 - **Data storage**: All local on device (localStorage). Text only — photos are sent to Gemini for analysis but not stored.
 - **Data model**:
-  - Food entry: `{ id, timestamp, items: string[], categories: string[] }`
-  - Eczema entry: `{ id, timestamp, severity: 1-5, bodyArea: string, description: string }`
+  - Food entry: `{ id, timestamp, items: Array<{name: string, qty: string}>, categories: string[], calories: number|null }`
+    - Old entries may still have `items: string[]` — handled via `normalizeItems()` / `itemsToDisplay()` helpers
+  - Skin entry (still keyed as `eczemaEntries` internally): `{ id, timestamp, severity: 1-5, bodyArea: string, description: string }`
   - Categories are broad food groups for correlation (e.g. "dairy", "gluten", "seafood", "fried food", "coconut milk", "eggs", "nuts", "caffeine", "alcohol", "spicy food", "processed food", "sugar")
 - **No backend server** — everything runs client-side
 - **API key stored in localStorage** on user's device only
