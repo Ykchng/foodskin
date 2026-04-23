@@ -155,6 +155,39 @@ Return ONLY the JSON, no other text.`;
   return JSON.parse(cleaned);
 }
 
+async function estimateCaloriesFromItems(apiKey, items) {
+  if (!items || items.length === 0) throw new Error("No items to estimate");
+  const itemsText = items
+    .filter((i) => i.name && i.name.trim())
+    .map((i) => (i.qty && i.qty.trim() ? `${i.name} (${i.qty})` : i.name))
+    .join(", ");
+  if (!itemsText) throw new Error("No items to estimate");
+
+  const prompt = `Estimate the total calories (kcal) for this meal: ${itemsText}.
+Return ONLY a JSON object: {"calories": 650}
+No other text, no explanation. Calories must be a single integer representing the total kcal for everything listed.`;
+
+  const resp = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+    }
+  );
+
+  if (!resp.ok) {
+    const err = await resp.text();
+    throw new Error(`Gemini API error: ${resp.status} ${err}`);
+  }
+
+  const data = await resp.json();
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  const cleaned = text.replace(/```json|```/g, "").trim();
+  const parsed = JSON.parse(cleaned);
+  return parsed.calories;
+}
+
 // ─── Analysis Engine ───────────────────────────────────────────────────
 // Continuous-severity model: for each food category, compute the average
 // skin severity across readings taken 12–48h AFTER eating that category,
@@ -364,6 +397,19 @@ function FoodLogScreen({ apiKey, data, setData }) {
   const [editingTimeId, setEditingTimeId] = useState(null);
   const [timeDraft, setTimeDraft] = useState("");
   const [error, setError] = useState("");
+  const [recalcLoading, setRecalcLoading] = useState(false);
+
+  const handleRecalcCalories = async () => {
+    setRecalcLoading(true);
+    setError("");
+    try {
+      const kcal = await estimateCaloriesFromItems(apiKey, editItemsList);
+      if (kcal != null && !isNaN(kcal)) setEditCalories(String(Math.round(kcal)));
+    } catch (e) {
+      setError(e.message);
+    }
+    setRecalcLoading(false);
+  };
 
   const handleCapture = async (base64, mimeType) => {
     setLoading(true);
@@ -450,7 +496,21 @@ function FoodLogScreen({ apiKey, data, setData }) {
             style={{ width: "100%", padding: "12px 14px", background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: 8, color: colors.text, fontSize: 14, fontFamily: fontStack, boxSizing: "border-box", marginBottom: 14, outline: "none" }}
           />
 
-          <label style={{ fontSize: 12, color: colors.textDim, fontWeight: 600, display: "block", marginBottom: 6 }}>Calories (kcal)</label>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+            <label style={{ fontSize: 12, color: colors.textDim, fontWeight: 600 }}>Calories (kcal)</label>
+            <button
+              onClick={handleRecalcCalories}
+              disabled={recalcLoading || editItemsList.filter((i) => i.name.trim()).length === 0}
+              style={{
+                fontSize: 11, color: recalcLoading ? colors.textMuted : colors.accentDim,
+                background: "none", border: `1px solid ${colors.border}`, borderRadius: 6,
+                padding: "4px 10px", cursor: recalcLoading ? "default" : "pointer",
+                fontFamily: fontStack, fontWeight: 600,
+              }}
+            >
+              {recalcLoading ? "…recalculating" : "🔄 Recalculate"}
+            </button>
+          </div>
           <input value={editCalories} onChange={(e) => setEditCalories(e.target.value.replace(/[^0-9]/g, ""))}
             inputMode="numeric"
             placeholder="e.g. 450"
