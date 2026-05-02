@@ -116,6 +116,7 @@ Return ONLY the JSON, no other text.`
       : `You are a dermatology assistant helping someone track their skin condition daily. Analyze this photo of skin and return a JSON object:
 {
   "severity": 2,
+  "bodyArea": "face",
   "description": "brief description of the skin condition"
 }
 Rate severity 1-5 based on what you see (the skin may be completely healthy today):
@@ -124,6 +125,7 @@ Rate severity 1-5 based on what you see (the skin may be completely healthy toda
 3 = Mild (visible redness, dryness, or rough patches)
 4 = Moderate (noticeable rash, inflammation, or irritation)
 5 = Severe (intense redness, cracking, widespread flare-up)
+bodyArea must be exactly one of: "face", "neck", "arms", "body", "legs". Pick the best match for what's shown. If unclear, default to "face".
 Return ONLY the JSON, no other text.`;
 
   const resp = await fetch(
@@ -600,6 +602,7 @@ function EczemaLogScreen({ apiKey, data, setData }) {
       setResult(res);
       setSeverity(res.severity || 3);
       setDescription(res.description || "");
+      if (res.bodyArea && bodyAreas.includes(res.bodyArea)) setBodyArea(res.bodyArea);
     } catch (e) {
       setError(e.message);
     }
