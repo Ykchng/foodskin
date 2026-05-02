@@ -350,7 +350,7 @@ function BottomNav({ tab, setTab }) {
   );
 }
 
-function PhotoCapture({ onCapture, loading }) {
+function PhotoCapture({ onCapture, loading, facing = "environment" }) {
   const fileRef = useRef();
   const handleFile = (e) => {
     const file = e.target.files?.[0];
@@ -365,7 +365,7 @@ function PhotoCapture({ onCapture, loading }) {
 
   return (
     <div style={{ display: "flex", gap: 12 }}>
-      <button onClick={() => { fileRef.current.setAttribute("capture", "environment"); fileRef.current.click(); }}
+      <button onClick={() => { fileRef.current.setAttribute("capture", facing); fileRef.current.click(); }}
         disabled={loading}
         style={{
           flex: 1, padding: "16px 0", background: colors.accent, color: colors.bg,
@@ -643,7 +643,7 @@ function EczemaLogScreen({ apiKey, data, setData }) {
       <div style={{ fontSize: 24, fontWeight: 700, color: colors.text, marginBottom: 4 }}>Daily Skin Check</div>
       <div style={{ color: colors.textDim, fontSize: 13, marginBottom: 20 }}>Snap a photo of your skin today — healthy days count too</div>
 
-      <PhotoCapture onCapture={handleCapture} loading={loading} />
+      <PhotoCapture onCapture={handleCapture} loading={loading} facing="user" />
 
       {error && (
         <div style={{ marginTop: 16, padding: 14, background: "#2D1B1B", border: `1px solid ${colors.danger}`, borderRadius: 10, color: colors.danger, fontSize: 13 }}>
