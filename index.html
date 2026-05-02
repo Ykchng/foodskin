@@ -157,7 +157,7 @@ Return ONLY the JSON, no other text.`;
   return JSON.parse(cleaned);
 }
 
-async function estimateCaloriesFromItems(apiKey, items) {
+async function recalculateFromItems(apiKey, items) {
   if (!items || items.length === 0) throw new Error("No items to estimate");
   const itemsText = items
     .filter((i) => i.name && i.name.trim())
@@ -165,9 +165,11 @@ async function estimateCaloriesFromItems(apiKey, items) {
     .join(", ");
   if (!itemsText) throw new Error("No items to estimate");
 
-  const prompt = `Estimate the total calories (kcal) for this meal: ${itemsText}.
-Return ONLY a JSON object: {"calories": 650}
-No other text, no explanation. Calories must be a single integer representing the total kcal for everything listed.`;
+  const prompt = `For this meal: ${itemsText}
+Return ONLY a JSON object: {"calories": 650, "categories": ["fried food", "rice"]}
+- calories: a single integer for the total kcal of everything listed.
+- categories: broad food groups present (e.g. "dairy", "gluten", "seafood", "fried food", "coconut milk", "eggs", "nuts", "caffeine", "alcohol", "spicy food", "processed food", "sugar"). Only include categories that actually apply to the items listed.
+No other text, no explanation.`;
 
   const resp = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
@@ -187,7 +189,7 @@ No other text, no explanation. Calories must be a single integer representing th
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
   const cleaned = text.replace(/```json|```/g, "").trim();
   const parsed = JSON.parse(cleaned);
-  return parsed.calories;
+  return { calories: parsed.calories, categories: parsed.categories };
 }
 
 // ─── Analysis Engine ───────────────────────────────────────────────────
@@ -396,6 +398,7 @@ function FoodLogScreen({ apiKey, data, setData }) {
   const [editItemsList, setEditItemsList] = useState([]); // [{id,name,qty}]
   const [editCats, setEditCats] = useState("");
   const [editCalories, setEditCalories] = useState("");
+  const [editTimestamp, setEditTimestamp] = useState(toDateTimeLocal(Date.now()));
   const [editingTimeId, setEditingTimeId] = useState(null);
   const [timeDraft, setTimeDraft] = useState("");
   const [error, setError] = useState("");
@@ -405,8 +408,9 @@ function FoodLogScreen({ apiKey, data, setData }) {
     setRecalcLoading(true);
     setError("");
     try {
-      const kcal = await estimateCaloriesFromItems(apiKey, editItemsList);
-      if (kcal != null && !isNaN(kcal)) setEditCalories(String(Math.round(kcal)));
+      const res = await recalculateFromItems(apiKey, editItemsList);
+      if (res.calories != null && !isNaN(res.calories)) setEditCalories(String(Math.round(res.calories)));
+      if (Array.isArray(res.categories)) setEditCats(res.categories.join(", "));
     } catch (e) {
       setError(e.message);
     }
@@ -423,6 +427,7 @@ function FoodLogScreen({ apiKey, data, setData }) {
       setEditItemsList(normalizeItems(res.items || []).map((i) => ({ ...i, id: generateId() })));
       setEditCats((res.categories || []).join(", "));
       setEditCalories(res.calories != null ? String(res.calories) : "");
+      setEditTimestamp(toDateTimeLocal(Date.now()));
     } catch (e) {
       setError(e.message);
     }
@@ -438,9 +443,10 @@ function FoodLogScreen({ apiKey, data, setData }) {
 
   const handleSave = () => {
     const cal = parseInt(editCalories, 10);
+    const ts = fromDateTimeLocal(editTimestamp) || Date.now();
     const entry = {
       id: generateId(),
-      timestamp: Date.now(),
+      timestamp: ts,
       items: editItemsList.filter((i) => i.name.trim()).map(({ name, qty }) => ({ name: name.trim(), qty: qty.trim() })),
       categories: editCats.split(",").map((s) => s.trim()).filter(Boolean),
       calories: isNaN(cal) ? null : cal,
@@ -452,6 +458,7 @@ function FoodLogScreen({ apiKey, data, setData }) {
     setEditItemsList([]);
     setEditCats("");
     setEditCalories("");
+    setEditTimestamp(toDateTimeLocal(Date.now()));
   };
 
   return (
@@ -510,13 +517,24 @@ function FoodLogScreen({ apiKey, data, setData }) {
                 fontFamily: fontStack, fontWeight: 600,
               }}
             >
-              {recalcLoading ? "…recalculating" : "🔄 Recalculate"}
+              {recalcLoading ? "…recalculating" : "🔄 Recalculate kcal & categories"}
             </button>
           </div>
           <input value={editCalories} onChange={(e) => setEditCalories(e.target.value.replace(/[^0-9]/g, ""))}
             inputMode="numeric"
             placeholder="e.g. 450"
-            style={{ width: "100%", padding: "12px 14px", background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: 8, color: colors.text, fontSize: 14, fontFamily: monoStack, boxSizing: "border-box", marginBottom: 16, outline: "none" }}
+            style={{ width: "100%", padding: "12px 14px", background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: 8, color: colors.text, fontSize: 14, fontFamily: monoStack, boxSizing: "border-box", marginBottom: 14, outline: "none" }}
+          />
+
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+            <label style={{ fontSize: 12, color: colors.textDim, fontWeight: 600 }}>Date & Time</label>
+            <button onClick={() => setEditTimestamp(toDateTimeLocal(Date.now()))}
+              style={{ fontSize: 11, color: colors.accentDim, background: "none", border: `1px solid ${colors.border}`, borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontFamily: fontStack, fontWeight: 600 }}>
+              ↻ Now
+            </button>
+          </div>
+          <input type="datetime-local" value={editTimestamp} onChange={(e) => setEditTimestamp(e.target.value)}
+            style={{ width: "100%", padding: "12px 14px", background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: 8, color: colors.text, fontSize: 14, fontFamily: fontStack, boxSizing: "border-box", marginBottom: 16, outline: "none" }}
           />
 
           <button onClick={handleSave} style={{
@@ -588,6 +606,7 @@ function EczemaLogScreen({ apiKey, data, setData }) {
   const [severity, setSeverity] = useState(3);
   const [bodyArea, setBodyArea] = useState("face");
   const [description, setDescription] = useState("");
+  const [editTimestamp, setEditTimestamp] = useState(toDateTimeLocal(Date.now()));
   const [editingTimeId, setEditingTimeId] = useState(null);
   const [timeDraft, setTimeDraft] = useState("");
   const [error, setError] = useState("");
@@ -603,6 +622,7 @@ function EczemaLogScreen({ apiKey, data, setData }) {
       setSeverity(res.severity || 3);
       setDescription(res.description || "");
       if (res.bodyArea && bodyAreas.includes(res.bodyArea)) setBodyArea(res.bodyArea);
+      setEditTimestamp(toDateTimeLocal(Date.now()));
     } catch (e) {
       setError(e.message);
     }
@@ -610,9 +630,10 @@ function EczemaLogScreen({ apiKey, data, setData }) {
   };
 
   const handleSave = () => {
+    const ts = fromDateTimeLocal(editTimestamp) || Date.now();
     const entry = {
       id: generateId(),
-      timestamp: Date.now(),
+      timestamp: ts,
       severity,
       bodyArea,
       description,
@@ -622,12 +643,14 @@ function EczemaLogScreen({ apiKey, data, setData }) {
     saveData(updated);
     setResult(null);
     setDescription("");
+    setEditTimestamp(toDateTimeLocal(Date.now()));
   };
 
   const handleManualSave = () => {
+    const ts = fromDateTimeLocal(editTimestamp) || Date.now();
     const entry = {
       id: generateId(),
-      timestamp: Date.now(),
+      timestamp: ts,
       severity,
       bodyArea,
       description: description || "Manual entry",
@@ -636,6 +659,7 @@ function EczemaLogScreen({ apiKey, data, setData }) {
     setData(updated);
     saveData(updated);
     setDescription("");
+    setEditTimestamp(toDateTimeLocal(Date.now()));
   };
 
   const severityColors = ["#6EE7B7", "#A7F3D0", "#FCD34D", "#F97316", "#EF4444"];
@@ -694,7 +718,18 @@ function EczemaLogScreen({ apiKey, data, setData }) {
         <textarea value={description} onChange={(e) => setDescription(e.target.value)}
           placeholder="Any notes about your skin today..."
           rows={2}
-          style={{ width: "100%", padding: "12px 14px", background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: 8, color: colors.text, fontSize: 14, fontFamily: fontStack, boxSizing: "border-box", marginBottom: 16, outline: "none", resize: "none" }}
+          style={{ width: "100%", padding: "12px 14px", background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: 8, color: colors.text, fontSize: 14, fontFamily: fontStack, boxSizing: "border-box", marginBottom: 14, outline: "none", resize: "none" }}
+        />
+
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+          <label style={{ fontSize: 12, color: colors.textDim, fontWeight: 600 }}>Date & Time</label>
+          <button onClick={() => setEditTimestamp(toDateTimeLocal(Date.now()))}
+            style={{ fontSize: 11, color: colors.accentDim, background: "none", border: `1px solid ${colors.border}`, borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontFamily: fontStack, fontWeight: 600 }}>
+            ↻ Now
+          </button>
+        </div>
+        <input type="datetime-local" value={editTimestamp} onChange={(e) => setEditTimestamp(e.target.value)}
+          style={{ width: "100%", padding: "12px 14px", background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: 8, color: colors.text, fontSize: 14, fontFamily: fontStack, boxSizing: "border-box", marginBottom: 16, outline: "none" }}
         />
 
         <button onClick={result ? handleSave : handleManualSave} style={{
